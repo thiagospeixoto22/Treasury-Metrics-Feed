@@ -23,15 +23,15 @@ jobs:
 
       - name: Restore Gmail credentials.json
         env:
-          GMAIL_CREDENTIALS_B64: ${{ secrets.GMAIL_CREDENTIALS_B64 }}
+          GMAIL_CREDENTIALS_JSON: ${{ secrets.GMAIL_CREDENTIALS_JSON }}
         run: |
-          echo "$GMAIL_CREDENTIALS_B64" | base64 --decode > credentials.json
+          printf '%s' "$GMAIL_CREDENTIALS_JSON" > credentials.json
 
       - name: Restore Gmail token.json
         env:
-          GMAIL_TOKEN_B64: ${{ secrets.GMAIL_TOKEN_B64 }}
+          GMAIL_TOKEN_JSON: ${{ secrets.GMAIL_TOKEN_JSON }}
         run: |
-          echo "$GMAIL_TOKEN_B64" | base64 --decode > token.json
+          printf '%s' "$GMAIL_TOKEN_JSON" > token.json
 
       - name: Run treasury feed
         env:

@@ -1,0 +1,47 @@
+name: Treasury Metrics Feed
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 13 * * 5"
+
+jobs:
+  send-weekly-feed:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Restore Gmail credentials.json
+        env:
+          GMAIL_CREDENTIALS_B64: ${{ secrets.GMAIL_CREDENTIALS_B64 }}
+        run: |
+          echo "$GMAIL_CREDENTIALS_B64" | base64 --decode > credentials.json
+
+      - name: Restore Gmail token.json
+        env:
+          GMAIL_TOKEN_B64: ${{ secrets.GMAIL_TOKEN_B64 }}
+        run: |
+          echo "$GMAIL_TOKEN_B64" | base64 --decode > token.json
+
+      - name: Run treasury feed
+        env:
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+          SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
+          RECIPIENTS: ${{ secrets.RECIPIENTS }}
+          EMAIL_SUBJECT_PREFIX: ${{ secrets.EMAIL_SUBJECT_PREFIX }}
+          REPORT_TIMEZONE: America/New_York
+          LOOKBACK_DAYS: "450"
+          CHART_DAYS: "365"
+          CREDENTIALS_FILE: credentials.json
+          TOKEN_FILE: token.json
+        run: python treasury_feed.py

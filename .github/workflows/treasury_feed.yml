@@ -3,7 +3,7 @@ name: Treasury Metrics Feed
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 13 * * 5"
+    - cron: "7 13 * * 1"
 
 jobs:
   send-weekly-feed:

@@ -337,8 +337,7 @@ def should_include_monthly_macro(monthly_metrics: dict, state: dict) -> bool:
     last_sent_cpi_period = state.get("last_sent_cpi_period", "")
     last_sent_payroll_period = state.get("last_sent_payroll_period", "")
 
-    # Best option: wait until BOTH monthly series have rolled forward,
-    # so the email gets one monthly macro update instead of two.
+
     return (
         latest_cpi_period != last_sent_cpi_period
         and latest_payroll_period != last_sent_payroll_period

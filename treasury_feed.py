@@ -270,31 +270,42 @@ def build_monthly_macro_metrics(api_key: str, lookback_days: int = 3650) -> dict
     cpi_yoy = cpi.pct_change(12) * 100.0
     payroll_change = payroll.diff()
 
-    latest_cpi_date, latest_cpi_yoy = last_value_on_or_before_series(cpi_yoy.dropna(), cpi_yoy.dropna().index[-1])
+    cpi_yoy_clean = cpi_yoy.dropna()
+    payroll_change_clean = payroll_change.dropna()
+
+    latest_cpi_date, latest_cpi_yoy = last_value_on_or_before_series(
+        cpi_yoy_clean,
+        cpi_yoy_clean.index[-1],
+    )
+    prev_cpi_date = cpi_yoy_clean.index[-2]
+    prev_cpi_value = float(cpi_yoy_clean.loc[prev_cpi_date])
+
     latest_payroll_date, latest_payroll_change = last_value_on_or_before_series(
-        payroll_change.dropna(),
-        payroll_change.dropna().index[-1],
+        payroll_change_clean,
+        payroll_change_clean.index[-1],
     )
 
-    prev_cpi_date = cpi_yoy.dropna().index[-2]
-    prev_payroll_date = payroll_change.dropna().index[-2]
+    prior_12m_window = payroll_change_clean.iloc[-13:-1]
+    if len(prior_12m_window) < 12:
+        raise RuntimeError("Not enough payroll history to calculate prior 12-month average.")
 
-    prev_cpi_value = float(cpi_yoy.loc[prev_cpi_date])
-    prev_payroll_value = float(payroll_change.loc[prev_payroll_date])
+    prior_12m_avg_payroll_change = float(prior_12m_window.mean())
 
     return {
         "cpi_level_series": cpi,
-        "cpi_yoy_series": cpi_yoy.dropna(),
+        "cpi_yoy_series": cpi_yoy_clean,
         "payroll_level_series": payroll,
-        "payroll_change_series": payroll_change.dropna(),
+        "payroll_change_series": payroll_change_clean,
         "latest_cpi_date": latest_cpi_date,
         "latest_cpi_yoy": latest_cpi_yoy,
         "prev_cpi_date": prev_cpi_date,
         "prev_cpi_yoy": prev_cpi_value,
         "latest_payroll_date": latest_payroll_date,
         "latest_payroll_change": latest_payroll_change,
-        "prev_payroll_date": prev_payroll_date,
-        "prev_payroll_change": prev_payroll_value,
+        "prior_12m_start": prior_12m_window.index[0],
+        "prior_12m_end": prior_12m_window.index[-1],
+        "prior_12m_avg_payroll_change": prior_12m_avg_payroll_change,
+        "payroll_vs_12m_avg": latest_payroll_change - prior_12m_avg_payroll_change,
     }
 
 
@@ -441,16 +452,34 @@ def build_inflation_chart(cpi_yoy_series: pd.Series, years: int = 5) -> bytes:
 
 
 def build_payroll_chart(payroll_change_series: pd.Series, months: int = 24) -> bytes:
-    chart_series = payroll_change_series.tail(months)
+    chart_series = payroll_change_series.tail(months).copy()
 
-    fig, ax = plt.subplots(figsize=(7.2, 3.4))
-    ax.bar(chart_series.index, chart_series.values)
+    positions = list(range(len(chart_series)))
+    labels = [dt.strftime("%b %y") for dt in chart_series.index]
+
+    if len(chart_series) >= 13:
+        prior_12m_avg = float(chart_series.iloc[-13:-1].mean())
+    else:
+        prior_12m_avg = float(chart_series.mean())
+
+    fig, ax = plt.subplots(figsize=(8.0, 3.8))
+
+    ax.bar(positions, chart_series.values, width=0.72, label="Monthly payroll change")
+    ax.axhline(0, linewidth=1)
+    ax.axhline(prior_12m_avg, linestyle="--", linewidth=1.5, label="Prior 12M avg")
+
+    tick_idx = list(range(0, len(positions), 2))
+    if tick_idx[-1] != len(positions) - 1:
+        tick_idx.append(len(positions) - 1)
+
+    ax.set_xticks(tick_idx)
+    ax.set_xticklabels([labels[i] for i in tick_idx], rotation=45, ha="right")
 
     ax.set_title("Job Growth — Monthly Change in Nonfarm Payrolls")
     ax.set_ylabel("Change (Thousands)")
-    ax.set_xlabel("Date")
+    ax.set_xlabel("Month")
     ax.grid(True, axis="y", alpha=0.3)
-    fig.autofmt_xdate()
+    ax.legend()
     fig.tight_layout()
 
     buffer = BytesIO()
@@ -497,7 +526,8 @@ def build_email_bodies(
         latest_cpi_month = monthly_metrics["latest_cpi_date"].strftime("%B %Y")
         prev_cpi_month = monthly_metrics["prev_cpi_date"].strftime("%B %Y")
         latest_payroll_month = monthly_metrics["latest_payroll_date"].strftime("%B %Y")
-        prev_payroll_month = monthly_metrics["prev_payroll_date"].strftime("%B %Y")
+        prior_12m_start = monthly_metrics["prior_12m_start"].strftime("%b %Y")
+        prior_12m_end = monthly_metrics["prior_12m_end"].strftime("%b %Y")
 
         monthly_html = f"""
         <h3 style="margin-top: 26px;">Monthly Macro Update</h3>
@@ -506,17 +536,20 @@ def build_email_bodies(
           <tr style="background-color: #f3f3f3;">
             <th align="left">Metric</th>
             <th align="right">Latest</th>
-            <th align="right">Prior</th>
+            <th align="right">Benchmark</th>
+            <th align="right">Delta</th>
           </tr>
           <tr>
             <td>Headline CPI YoY</td>
             <td align="right">{monthly_metrics["latest_cpi_yoy"]:.2f}% ({latest_cpi_month})</td>
             <td align="right">{monthly_metrics["prev_cpi_yoy"]:.2f}% ({prev_cpi_month})</td>
+            <td align="right">{monthly_metrics["latest_cpi_yoy"] - monthly_metrics["prev_cpi_yoy"]:+.2f} pp</td>
           </tr>
           <tr>
             <td>Monthly Payroll Growth</td>
             <td align="right">{format_thousands(monthly_metrics["latest_payroll_change"])} ({latest_payroll_month})</td>
-            <td align="right">{format_thousands(monthly_metrics["prev_payroll_change"])} ({prev_payroll_month})</td>
+            <td align="right">{format_thousands(monthly_metrics["prior_12m_avg_payroll_change"])} ({prior_12m_start}–{prior_12m_end} avg)</td>
+            <td align="right">{format_thousands(monthly_metrics["payroll_vs_12m_avg"])}</td>
           </tr>
         </table>
 
@@ -529,7 +562,7 @@ def build_email_bodies(
 
 Monthly Macro Update:
 Headline CPI YoY: {monthly_metrics["latest_cpi_yoy"]:.2f}% ({latest_cpi_month}) | Prior: {monthly_metrics["prev_cpi_yoy"]:.2f}% ({prev_cpi_month})
-Monthly Payroll Growth: {format_thousands(monthly_metrics["latest_payroll_change"])} ({latest_payroll_month}) | Prior: {format_thousands(monthly_metrics["prev_payroll_change"])} ({prev_payroll_month})
+Monthly Payroll Growth: {format_thousands(monthly_metrics["latest_payroll_change"])} ({latest_payroll_month}) | Prior 12M Avg: {format_thousands(monthly_metrics["prior_12m_avg_payroll_change"])} ({prior_12m_start}–{prior_12m_end}) | Delta: {format_thousands(monthly_metrics["payroll_vs_12m_avg"])}
 """.rstrip()
 
     html = f"""

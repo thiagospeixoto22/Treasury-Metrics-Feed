@@ -4,6 +4,10 @@ on:
   workflow_dispatch:
   schedule:
     - cron: "7 13 * * 1"
+    - cron: "7 14 * * 1"
+
+permissions:
+  contents: write
 
 jobs:
   send-weekly-feed:
@@ -13,35 +17,74 @@ jobs:
       - name: Check out repo
         uses: actions/checkout@v4
 
+      - name: Gate on Monday 9 AM New York time
+        id: gate
+        run: |
+          python - <<'PY'
+          import os
+          from datetime import datetime
+          from zoneinfo import ZoneInfo
+
+          now = datetime.now(ZoneInfo("America/New_York"))
+          should_run = (now.weekday() == 0 and now.hour == 9)
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
+              f.write(f"should_run={'true' if should_run else 'false'}\n")
+              f.write(f"now_et={now.isoformat()}\n")
+
+          print(f"Current ET time: {now.isoformat()}")
+          print(f"should_run={should_run}")
+          PY
+
       - name: Set up Python
+        if: steps.gate.outputs.should_run == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: Install dependencies
+        if: steps.gate.outputs.should_run == 'true'
         run: pip install -r requirements.txt
 
       - name: Restore Gmail credentials.json
+        if: steps.gate.outputs.should_run == 'true'
         env:
           GMAIL_CREDENTIALS_JSON: ${{ secrets.GMAIL_CREDENTIALS_JSON }}
         run: |
           printf '%s' "$GMAIL_CREDENTIALS_JSON" > credentials.json
 
       - name: Restore Gmail token.json
+        if: steps.gate.outputs.should_run == 'true'
         env:
           GMAIL_TOKEN_JSON: ${{ secrets.GMAIL_TOKEN_JSON }}
         run: |
           printf '%s' "$GMAIL_TOKEN_JSON" > token.json
 
       - name: Run treasury feed
+        if: steps.gate.outputs.should_run == 'true'
         env:
           FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
           SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
           RECIPIENTS: ${{ secrets.RECIPIENTS }}
           EMAIL_SUBJECT_PREFIX: ${{ secrets.EMAIL_SUBJECT_PREFIX }}
-          REPORT_TIMEZONE: America/New_York
           LOOKBACK_DAYS: "450"
           CHART_DAYS: "365"
           CREDENTIALS_FILE: credentials.json
           TOKEN_FILE: token.json
+          STATE_FILE: report_state.json
         run: python treasury_feed.py
+
+      - name: Commit updated state file
+        if: steps.gate.outputs.should_run == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if git diff --quiet report_state.json; then
+            echo "No state changes to commit."
+            exit 0
+          fi
+
+          git add report_state.json
+          git commit -m "Update monthly macro report state"
+          git push

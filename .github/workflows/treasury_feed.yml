@@ -19,23 +19,31 @@ jobs:
 
       - name: Gate on Monday 9 AM New York time
         id: gate
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
         run: |
           python - <<'PY'
           import os
           from datetime import datetime
           from zoneinfo import ZoneInfo
 
+          event_name = os.environ["GITHUB_EVENT_NAME"]
           now = datetime.now(ZoneInfo("America/New_York"))
-          should_run = (now.weekday() == 0 and now.hour == 9)
+
+          scheduled_window = (now.weekday() == 0 and now.hour == 9)
+          should_run = (event_name == "workflow_dispatch") or scheduled_window
 
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
-              f.write(f"should_run={'true' if should_run else 'false'}\n")
-              f.write(f"now_et={now.isoformat()}\n")
+            f.write(f"should_run={'true' if should_run else 'false'}\n")
+            f.write(f"now_et={now.isoformat()}\n")
+            f.write(f"event_name={event_name}\n")
 
+          print(f"Event: {event_name}")
           print(f"Current ET time: {now.isoformat()}")
+          print(f"scheduled_window={scheduled_window}")
           print(f"should_run={should_run}")
           PY
-
+        
       - name: Set up Python
         if: steps.gate.outputs.should_run == 'true'
         uses: actions/setup-python@v5
